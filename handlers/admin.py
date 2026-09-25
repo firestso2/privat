@@ -15,6 +15,46 @@ def _is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
+@router.message(Command("myid"))
+async def cmd_myid(message: Message) -> None:
+    """Публичная команда — показывает Telegram ID, чтобы свериться с ADMIN_IDS в .env."""
+    await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
+
+
+def _mask(value: str) -> str:
+    if not value:
+        return "❌ не задано"
+    if len(value) <= 6:
+        return "✅ задано (слишком короткое, чтобы замаскировать)"
+    return f"✅ задано ({value[:4]}...{value[-4:]}, длина {len(value)})"
+
+
+@router.message(Command("debug_env"))
+async def cmd_debug_env(message: Message) -> None:
+    """
+    Только для админа: показывает, какие переменные окружения реально видит
+    процесс бота (значения маскируются). Нужна, чтобы проверить, дошли ли
+    переменные, заданные отдельно в панели хостинга, до самого бота.
+    """
+    if not _is_admin(message.from_user.id):
+        return
+
+    import config as cfg
+
+    lines = [
+        "Что видит бот в переменных окружения (значения замаскированы):",
+        "",
+        f"BOT_TOKEN: {_mask(cfg.BOT_TOKEN)}",
+        f"ADMIN_IDS: {'✅ ' + str(cfg.ADMIN_IDS) if cfg.ADMIN_IDS else '❌ пусто'}",
+        f"PRIVATE_CHANNEL_ID: {'✅ ' + str(cfg.PRIVATE_CHANNEL_ID) if cfg.PRIVATE_CHANNEL_ID else '❌ не задан (0)'}",
+        f"YOOKASSA_SHOP_ID: {_mask(cfg.YOOKASSA_SHOP_ID)}",
+        f"YOOKASSA_SECRET_KEY: {_mask(cfg.YOOKASSA_SECRET_KEY)}",
+        f"CRYPTOBOT_API_TOKEN: {_mask(cfg.CRYPTOBOT_API_TOKEN)}",
+        f"XROCKET_API_TOKEN: {_mask(cfg.XROCKET_API_TOKEN)}",
+    ]
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message) -> None:
     if not _is_admin(message.from_user.id):
