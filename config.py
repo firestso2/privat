@@ -17,7 +17,7 @@ QUESTION_URL = "https://t.me/fabezo"
 # правом приглашать пользователей по ссылке (can_invite_users), иначе не
 # сможет ни создавать инвайт-ссылки, ни одобрять заявки на вступление.
 PRIVATE_CHANNEL_ID = int(os.getenv("PRIVATE_CHANNEL_ID", "0"))
-SUBSCRIPTION_PRICE = float(os.getenv("SUBSCRIPTION_PRICE", "990"))  # в рублях
+SUBSCRIPTION_PRICE = float(os.getenv("SUBSCRIPTION_PRICE", "3499"))  # в рублях
 SUBSCRIPTION_DESCRIPTION = "Доступ в приватку"
 INVITE_LINK_TTL_HOURS = 24  # сколько живёт неиспользованная ссылка, если оплативший не кликнул
 PAYMENT_POLL_INTERVAL_SEC = 15
