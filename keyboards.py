@@ -18,16 +18,23 @@ def main_menu(is_open: bool) -> InlineKeyboardMarkup:
 
 def method_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💳 Картой", callback_data="pay_method:card"))
     builder.row(InlineKeyboardButton(text="🏦 СБП", callback_data="pay_method:sbp"))
     builder.row(InlineKeyboardButton(text="🤖 CryptoBot", callback_data="pay_method:cryptobot"))
-    builder.row(InlineKeyboardButton(text="🚀 xRocket", callback_data="pay_method:xrocket"))
     return builder.as_markup()
 
 
 def pay_button(confirmation_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Оплатить", url=confirmation_url))
+    return builder.as_markup()
+
+
+def pay_button_with_confirm(pay_url: str, provider: str, payment_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="Оплатить", url=pay_url))
+    builder.row(
+        InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"cp:{provider}:{payment_id}")
+    )
     return builder.as_markup()
 
 
