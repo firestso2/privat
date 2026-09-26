@@ -1,4 +1,4 @@
-aiogram>=3.4,<4
+aiogram>=3.27,<4
 aiosqlite>=0.20
 python-dotenv>=1.0
 yookassa>=3.0
