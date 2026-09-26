@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 FALLBACK_TEXT_OPEN = (
-    "Добро пожаловать в JKG community.\n\n"
+    "Добро пожаловать в приватку.\n\n"
     "Нажми «войти в приватку», чтобы оформить доступ, "
-    "или посмотри, что внутри"
+    "или посмотри, что внутри, и отзывы других участников."
 )
-FALLBACK_TEXT_CLOSED = "Набор в приватку сейчас закрыт. Следующий набор начнется 3 октября."
+FALLBACK_TEXT_CLOSED = "Набор в приватку сейчас закрыт. Следи за обновлениями."
 
 
 @router.message(CommandStart())
@@ -94,8 +94,12 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             )
             await db.create_payment_record(invoice_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
             await callback.message.answer(
-                "Оплати через CryptoBot по кнопке ниже.",
-                reply_markup=kb.pay_button(pay_url),
+                "Оплати через CryptoBot по кнопке ниже.\n\n"
+                "⏱ Счёт нужно оплатить в течение 15 минут — после этого он станет "
+                "неактивным и нужно будет создавать новый.\n\n"
+                "После оплаты доступ откроется автоматически, но если хочешь "
+                "проверить сразу — нажми «Подтвердить оплату».",
+                reply_markup=kb.pay_button_with_confirm(pay_url, provider, invoice_id),
             )
             payment_id = invoice_id
 
@@ -121,6 +125,31 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
     asyncio.create_task(
         _poll_payment_and_grant(callback.bot, provider, payment_id, callback.from_user.id)
     )
+
+
+@router.callback_query(F.data.startswith("cp:"))
+async def confirm_payment(callback: CallbackQuery) -> None:
+    _, provider, payment_id = callback.data.split(":", 2)
+
+    try:
+        status = await check_status(provider, payment_id)
+    except RuntimeError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+
+    if status == PAID_STATUS.get(provider):
+        await db.update_payment_status(payment_id, status)
+        payment = await db.get_payment(payment_id)
+        if payment:
+            await access.grant_access(callback.bot, payment["user_id"], payment_id)
+        await callback.answer("Оплата подтверждена! Ссылка на вступление отправлена выше.", show_alert=True)
+    elif status in DEAD_STATUSES.get(provider, set()):
+        await callback.answer("Счёт истёк. Вернись в меню и создай новый.", show_alert=True)
+    else:
+        await callback.answer(
+            "Оплата пока не найдена. Если только что оплатил — подожди 10-15 секунд и нажми ещё раз.",
+            show_alert=True,
+        )
 
 
 def _qr_image(payload: str) -> BufferedInputFile:
