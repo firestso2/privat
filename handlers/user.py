@@ -35,6 +35,8 @@ FALLBACK_TEXT_CLOSED = "Набор в приватку сейчас закрыт
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    await db.record_user_seen(message.from_user.id)
+
     is_open = await db.is_enrollment_open()
     markup = kb.main_menu(is_open)
 
@@ -100,8 +102,9 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             await callback.message.answer(
                 "Оплати через CryptoBot по кнопке ниже.\n\n"
                 "⏱ Счёт нужно оплатить в течение 15 минут — после этого он станет "
-                "неактивным и нужно будет создавать новый.\n"
-                "После оплаты доступ откроется автоматически",
+                "неактивным и нужно будет создавать новый.\n\n"
+                "После оплаты доступ откроется автоматически, но если хочешь "
+                "проверить сразу — нажми «Подтвердить оплату».",
                 reply_markup=kb.pay_button_with_confirm(pay_url, provider, invoice_id),
             )
             payment_id = invoice_id
