@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS invites (
     status TEXT NOT NULL DEFAULT 'issued', -- issued / used / revoked
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    first_seen TEXT DEFAULT (datetime('now')),
+    last_seen TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -141,3 +147,42 @@ async def has_granted_invite(payment_id: str) -> bool:
             "SELECT 1 FROM invites WHERE payment_id = ?", (payment_id,)
         )
         return await cur.fetchone() is not None
+
+
+# --- статистика пользователей ---
+
+async def record_user_seen(user_id: int) -> None:
+    """Отмечает визит пользователя: заводит запись при первом визите, иначе обновляет last_seen."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO users (user_id, first_seen, last_seen) "
+            "VALUES (?, datetime('now'), datetime('now')) "
+            "ON CONFLICT(user_id) DO UPDATE SET last_seen = datetime('now')",
+            (user_id,),
+        )
+        await db.commit()
+
+
+async def get_user_stats() -> dict:
+    """
+    Возвращает total (уникальных пользователей за всё время) и число тех,
+    кто заходил в бота за последний год/месяц/неделю/день (по last_seen).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM users")
+        total = (await cur.fetchone())[0]
+
+        async def _since(days: int) -> int:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM users WHERE last_seen >= datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            return (await cur.fetchone())[0]
+
+        return {
+            "total": total,
+            "year": await _since(365),
+            "month": await _since(30),
+            "week": await _since(7),
+            "day": await _since(1),
+        }
