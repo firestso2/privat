@@ -62,6 +62,10 @@ async def enter_private(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("pay_method:"))
 async def choose_payment_method(callback: CallbackQuery) -> None:
+    if not await db.is_enrollment_open():
+        await callback.answer("Набор сейчас закрыт", show_alert=True)
+        return
+
     provider = callback.data.split(":", 1)[1]
     await callback.answer()
     payment_id = None
@@ -96,9 +100,8 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             await callback.message.answer(
                 "Оплати через CryptoBot по кнопке ниже.\n\n"
                 "⏱ Счёт нужно оплатить в течение 15 минут — после этого он станет "
-                "неактивным и нужно будет создавать новый.\n\n"
-                "После оплаты доступ откроется автоматически, но если хочешь "
-                "проверить сразу — нажми «Подтвердить оплату».",
+                "неактивным и нужно будет создавать новый.\n"
+                "После оплаты доступ откроется автоматически",
                 reply_markup=kb.pay_button_with_confirm(pay_url, provider, invoice_id),
             )
             payment_id = invoice_id
