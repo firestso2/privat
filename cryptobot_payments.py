@@ -28,14 +28,24 @@ async def _call(method: str, **params) -> dict:
             data = await resp.json()
 
     if not data.get("ok"):
-        raise RuntimeError(f"CryptoBot API вернул ошибку: {data.get('error')}")
+        error = data.get("error") or {}
+        if error.get("code") == 401:
+            raise RuntimeError(
+                "CryptoBot: неверный CRYPTOBOT_API_TOKEN (401 Unauthorized). "
+                "Проверь, что в .env вписан токен без пробелов/кавычек именно из "
+                "@CryptoBot -> /pay -> Create App -> API Token (не из тестнета), "
+                "и что бот был перезапущен после правки .env."
+            )
+        raise RuntimeError(f"CryptoBot API вернул ошибку: {error}")
     return data["result"]
 
 
-async def create_invoice(amount_rub: float, description: str) -> tuple[str, str]:
+async def create_invoice(amount_rub: float, description: str, expires_in_sec: int = 900) -> tuple[str, str]:
     """
     Создаёт инвойс на сумму в рублях (пользователь платит в любом из
     accepted_assets по текущему курсу). Возвращает (invoice_id, pay_url).
+    expires_in_sec — через сколько секунд счёт станет неактивным (по
+    умолчанию 900 = 15 минут), после этого нужно создавать новый.
     """
     result = await _call(
         "createInvoice",
@@ -44,6 +54,7 @@ async def create_invoice(amount_rub: float, description: str) -> tuple[str, str]
         accepted_assets=CRYPTOBOT_ACCEPTED_ASSETS,
         amount=f"{amount_rub:.2f}",
         description=description,
+        expires_in=expires_in_sec,
     )
     invoice_id = str(result["invoice_id"])
     pay_url = (
