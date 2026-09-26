@@ -18,8 +18,20 @@ def main_menu(is_open: bool) -> InlineKeyboardMarkup:
 
 def method_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🏦 СБП", callback_data="pay_method:sbp"))
-    builder.row(InlineKeyboardButton(text="🤖 CryptoBot", callback_data="pay_method:cryptobot"))
+    builder.row(
+        InlineKeyboardButton(
+            text="СБП",
+            callback_data="pay_method:sbp",
+            icon_custom_emoji_id="5190779568503412204",
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="CryptoBot",
+            callback_data="pay_method:cryptobot",
+            icon_custom_emoji_id="5361914370068613491",
+        )
+    )
     return builder.as_markup()
 
 
