@@ -15,6 +15,23 @@ def _is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
+@router.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    """Статистика по пользователям, заходившим в бота (/start)."""
+    if not _is_admin(message.from_user.id):
+        return
+
+    stats = await db.get_user_stats()
+    await message.answer(
+        "📊 Статистика пользователей\n\n"
+        f"Всего за всё время: {stats['total']}\n"
+        f"Заходили за год: {stats['year']}\n"
+        f"Заходили за месяц: {stats['month']}\n"
+        f"Заходили за неделю: {stats['week']}\n"
+        f"Заходили за сегодня: {stats['day']}"
+    )
+
+
 @router.message(Command("emoji_id"))
 async def cmd_emoji_id(message: Message) -> None:
     """
