@@ -15,6 +15,35 @@ def _is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
+@router.message(Command("emoji_id"))
+async def cmd_emoji_id(message: Message) -> None:
+    """
+    Достаёт emoji-id премиум-эмодзи. Пришли команду реплаем на сообщение с
+    премиум-эмодзи, или вставь эмодзи прямо после команды в этом же
+    сообщении — сработает и так, и так.
+    """
+    if not _is_admin(message.from_user.id):
+        return
+
+    target = message.reply_to_message or message
+    text = target.text or target.caption or ""
+    entities = target.entities or target.caption_entities or []
+    custom = [e for e in entities if e.type == "custom_emoji"]
+
+    if not custom:
+        await message.answer(
+            "Не нашёл премиум-эмодзи. Пришли /emoji_id реплаем на сообщение с "
+            "нужным эмодзи, либо вставь эмодзи прямо после команды в этом же сообщении."
+        )
+        return
+
+    lines = ["Найденные emoji-id:"]
+    for e in custom:
+        emoji_char = e.extract_from(text)
+        lines.append(f"{emoji_char} → `{e.custom_emoji_id}`")
+    await message.answer("\n".join(lines), parse_mode="Markdown")
+
+
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
     """Публичная команда — показывает Telegram ID, чтобы свериться с ADMIN_IDS в .env."""
