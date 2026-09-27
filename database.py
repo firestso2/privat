@@ -163,6 +163,14 @@ async def record_user_seen(user_id: int) -> None:
         await db.commit()
 
 
+async def get_all_user_ids() -> list[int]:
+    """Все user_id, кто хоть раз писал /start — для рассылки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id FROM users")
+        rows = await cur.fetchall()
+        return [row[0] for row in rows]
+
+
 async def get_user_stats() -> dict:
     """
     Возвращает total (уникальных пользователей за всё время) и число тех,
