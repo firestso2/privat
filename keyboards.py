@@ -60,4 +60,7 @@ def admin_menu(is_open: bool) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🟢 Открыть набор", callback_data="admin_open")
         )
+    builder.row(InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"))
+    builder.row(InlineKeyboardButton(text="🛠 Debug env", callback_data="admin_debug_env"))
+    builder.row(InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast"))
     return builder.as_markup()
