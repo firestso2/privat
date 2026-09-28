@@ -90,7 +90,7 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
             await callback.message.answer_photo(
                 _qr_image(qr_payload),
-                caption="Оплати вход по ссылке в приложении банка, которое поддерживает СБП. "
+                caption="Оплати вход по QR-коду в приложении банка"
                         "Доступ откроется автоматически после подтверждения оплаты.",
             )
 
