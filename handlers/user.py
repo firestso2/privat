@@ -30,7 +30,7 @@ FALLBACK_TEXT_OPEN = (
     "Нажми «войти в приватку», чтобы оформить доступ, "
     "или посмотри, что внутри, и отзывы других участников."
 )
-FALLBACK_TEXT_CLOSED = "Набор в приватку сейчас закрыт. Следи за обновлениями."
+FALLBACK_TEXT_CLOSED = "Набор в приватку сейчас закрыт. Следующий набор 03.10-10.10."
 
 
 @router.message(CommandStart())
@@ -57,15 +57,16 @@ async def enter_private(callback: CallbackQuery) -> None:
 
     await callback.answer()
     await callback.message.answer(
-        f"Стоимость доступа: {SUBSCRIPTION_PRICE:.0f} ₽\nВыбери способ оплаты:",
+        f"Стоимость доступа: <b>{SUBSCRIPTION_PRICE:.0f} ₽</b>\nВыбери способ оплаты:",
         reply_markup=kb.method_menu(),
+        parse_mode="HTML",
     )
 
 
 @router.callback_query(F.data.startswith("pay_method:"))
 async def choose_payment_method(callback: CallbackQuery) -> None:
     if not await db.is_enrollment_open():
-        await callback.answer("Набор сейчас закрыт. Следующий набор будет 03.10-10.10", show_alert=True)
+        await callback.answer("Набор сейчас закрыт", show_alert=True)
         return
 
     provider = callback.data.split(":", 1)[1]
@@ -83,19 +84,17 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
                 reply_markup=kb.pay_button(confirmation_url),
             )
 
-                        elif provider == "sbp":
-                            payment_id, qr_payload = payments.create_sbp_payment(
-                                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+        elif provider == "sbp":
+            payment_id, qr_payload = payments.create_sbp_payment(
+                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
             )
-                            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
-                            await callback.message.answer_photo(
-                                _qr_image(qr_payload),
-                                caption="Отсканируй QR в приложении банка, которое поддерживает СБП. "
-                                        "Доступ откроется автоматически после подтверждения оплаты.",
-                                reply_markup=kb.confirm_button(provider, payment_id),
+            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+            await callback.message.answer_photo(
+                _qr_image(qr_payload),
+                caption="Отсканируй QR в приложении банка, которое поддерживает СБП. "
+                        "Доступ откроется автоматически после подтверждения оплаты.",
+                reply_markup=kb.confirm_button(provider, payment_id),
             )
-
-
 
         elif provider == "cryptobot":
             invoice_id, pay_url = await cryptobot_payments.create_invoice(
@@ -105,8 +104,9 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             await callback.message.answer(
                 "Оплати через CryptoBot по кнопке ниже.\n\n"
                 "⏱ Счёт нужно оплатить в течение 15 минут — после этого он станет "
-                "неактивным и нужно будет создавать новый.\n"
-                "После оплаты ссылка отправится автоматически",
+                "неактивным и нужно будет создавать новый.\n\n"
+                "После оплаты доступ откроется автоматически, но если хочешь "
+                "проверить сразу — нажми «Подтвердить оплату».",
                 reply_markup=kb.pay_button_with_confirm(pay_url, provider, invoice_id),
             )
             payment_id = invoice_id
