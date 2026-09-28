@@ -48,6 +48,13 @@ def pay_button_with_confirm(pay_url: str, provider: str, payment_id: str) -> Inl
         InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"cp:{provider}:{payment_id}")
     )
     return builder.as_markup()
+def confirm_button(provider: str, payment_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"cp:{provider}:{payment_id}")
+    )
+    return builder.as_markup()
+
 
 
 def admin_menu(is_open: bool) -> InlineKeyboardMarkup:
