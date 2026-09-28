@@ -83,16 +83,19 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
                 reply_markup=kb.pay_button(confirmation_url),
             )
 
-        elif provider == "sbp":
-            payment_id, qr_payload = payments.create_sbp_payment(
-                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+                        elif provider == "sbp":
+                            payment_id, qr_payload = payments.create_sbp_payment(
+                                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
             )
-            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
-            await callback.message.answer_photo(
-                _qr_image(qr_payload),
-                caption="Оплати вход по QR-коду в приложении банка"
-                        "Доступ откроется автоматически после подтверждения оплаты.",
+                            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+                            await callback.message.answer_photo(
+                                _qr_image(qr_payload),
+                                caption="Отсканируй QR в приложении банка, которое поддерживает СБП. "
+                                        "Доступ откроется автоматически после подтверждения оплаты.",
+                                reply_markup=kb.confirm_button(provider, payment_id),
             )
+
+
 
         elif provider == "cryptobot":
             invoice_id, pay_url = await cryptobot_payments.create_invoice(
