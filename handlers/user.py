@@ -65,7 +65,7 @@ async def enter_private(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("pay_method:"))
 async def choose_payment_method(callback: CallbackQuery) -> None:
     if not await db.is_enrollment_open():
-        await callback.answer("Набор сейчас закрыт", show_alert=True)
+        await callback.answer("Набор сейчас закрыт. Следующий набор будет 03.10-10.10", show_alert=True)
         return
 
     provider = callback.data.split(":", 1)[1]
@@ -90,7 +90,7 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
             await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
             await callback.message.answer_photo(
                 _qr_image(qr_payload),
-                caption="Отсканируй QR в приложении банка, которое поддерживает СБП. "
+                caption="Оплати вход по ссылке в приложении банка, которое поддерживает СБП. "
                         "Доступ откроется автоматически после подтверждения оплаты.",
             )
 
