@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import extras
+
 
 from aiogram import Bot, Dispatcher
 
@@ -18,6 +20,7 @@ async def main() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+    await extras.setup(dp, bot)
     dp.include_router(admin.router)  # админ-роутер выше, чтобы команды не перехватывались юзерскими
     dp.include_router(user.router)
     dp.include_router(join_request.router)
