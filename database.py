@@ -97,6 +97,9 @@ async def create_payment_record(payment_id: str, user_id: int, amount: float, pr
             (payment_id, provider, user_id, amount),
         )
         await db.commit()
+    from promo import attach_to_payment
+    await attach_to_payment(payment_id, user_id)
+
 
 
 async def update_payment_status(payment_id: str, status: str) -> None:
