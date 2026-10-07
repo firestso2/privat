@@ -13,6 +13,7 @@ import payments
 import cryptobot_payments
 import xrocket_payments
 import access
+import promo
 from payment_dispatch import PAID_STATUS, DEAD_STATUSES, check_status
 from config import (
     SUBSCRIPTION_PRICE,
@@ -56,9 +57,10 @@ async def enter_private(callback: CallbackQuery) -> None:
         return
 
     await callback.answer()
+    info = await promo.get_price(callback.from_user.id)
     await callback.message.answer(
-        f"Стоимость доступа: <b>{SUBSCRIPTION_PRICE:.0f} ₽</b>\nВыбери способ оплаты:",
-        reply_markup=kb.method_menu(),
+        promo.price_text(info),
+        reply_markup=promo.with_button(kb.method_menu(), info),
         parse_mode="HTML",
     )
 
@@ -71,14 +73,21 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
 
     provider = callback.data.split(":", 1)[1]
     await callback.answer()
+
+    info = await promo.get_price(callback.from_user.id)
+    if info.dropped:  # промокод перестал действовать — показываем меню с новой ценой
+        await promo.show_price_menu(callback.message, callback.from_user.id, info)
+        return
+    price = info.final
+
     payment_id = None
 
     try:
         if provider == "card":
             payment_id, confirmation_url = payments.create_payment(
-                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+                callback.from_user.id, price, SUBSCRIPTION_DESCRIPTION
             )
-            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+            await db.create_payment_record(payment_id, callback.from_user.id, price, provider)
             await callback.message.answer(
                 "Оплати по кнопке ниже — доступ откроется автоматически после подтверждения оплаты.",
                 reply_markup=kb.pay_button(confirmation_url),
@@ -86,9 +95,9 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
 
         elif provider == "sbp":
             payment_id, qr_payload = payments.create_sbp_payment(
-                callback.from_user.id, SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+                callback.from_user.id, price, SUBSCRIPTION_DESCRIPTION
             )
-            await db.create_payment_record(payment_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+            await db.create_payment_record(payment_id, callback.from_user.id, price, provider)
             await callback.message.answer_photo(
                 _qr_image(qr_payload),
                 caption="Отсканируй QR в приложении банка, которое поддерживает СБП. "
@@ -98,9 +107,9 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
 
         elif provider == "cryptobot":
             invoice_id, pay_url = await cryptobot_payments.create_invoice(
-                SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+                price, SUBSCRIPTION_DESCRIPTION
             )
-            await db.create_payment_record(invoice_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+            await db.create_payment_record(invoice_id, callback.from_user.id, price, provider)
             await callback.message.answer(
                 "Оплати через CryptoBot по кнопке ниже.\n\n"
                 "⏱ Счёт нужно оплатить в течение 15 минут — после этого он станет "
@@ -113,9 +122,9 @@ async def choose_payment_method(callback: CallbackQuery) -> None:
 
         elif provider == "xrocket":
             invoice_id, pay_url = await xrocket_payments.create_invoice(
-                SUBSCRIPTION_PRICE, SUBSCRIPTION_DESCRIPTION
+                price, SUBSCRIPTION_DESCRIPTION
             )
-            await db.create_payment_record(invoice_id, callback.from_user.id, SUBSCRIPTION_PRICE, provider)
+            await db.create_payment_record(invoice_id, callback.from_user.id, price, provider)
             await callback.message.answer(
                 "Оплати через xRocket по кнопке ниже.",
                 reply_markup=kb.pay_button(pay_url),
