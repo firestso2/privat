@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import extras
+import promo
 
 
 from aiogram import Bot, Dispatcher
