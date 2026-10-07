@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 async def grant_access(bot: Bot, user_id: int, payment_id: str) -> str | None:
     """Создаёт одноразовую ссылку-заявку и отправляет её оплатившему пользователю."""
+    from promo import on_paid
+    await on_paid(bot, payment_id)
+
     if not PRIVATE_CHANNEL_ID:
         logger.error("PRIVATE_CHANNEL_ID не задан в .env — не могу выдать доступ")
         await bot.send_message(
