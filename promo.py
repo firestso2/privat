@@ -482,6 +482,10 @@ async def promo_enter(callback: CallbackQuery, state: FSMContext) -> None:
 @user_router.callback_query(F.data == "promo_cancel")
 async def promo_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await callback.answer("Отменено")
 
 
@@ -615,6 +619,7 @@ async def _list_view() -> tuple[str, InlineKeyboardMarkup]:
             f"padm:view:{p['code']}",
         )])
     rows.append([_btn("➕ Создать промокод", "pnew:start")])
+    rows.append([_btn("◀️ В админ-панель", "admin_home")])
     text = "🎟 Промокоды\n(покупки/лимит; 🟢 активен, ⏸ выключен, ⌛ истёк, 🔴 исчерпан)"
     if not promos:
         text = "🎟 Промокодов пока нет."
@@ -766,9 +771,14 @@ async def adm_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
 
 @adm.callback_query(F.data == "pedit:cancel")
 async def adm_edit_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    code = (await state.get_data()).get("code")
     await state.clear()
-    await _edit_or_answer(callback.message, "Отменено.")
-    await callback.answer()
+    view = await _card_view(code) if code else None
+    if view:
+        await _edit_or_answer(callback.message, *view)
+    else:
+        await _edit_or_answer(callback.message, "Отменено.")
+    await callback.answer("Отменено")
 
 
 async def _apply_edit(message: Message, code: str, op: str, new) -> None:
@@ -854,8 +864,9 @@ async def adm_delete(callback: CallbackQuery) -> None:
 @adm.callback_query(F.data == "pnew:cancel")
 async def new_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await _edit_or_answer(callback.message, "Создание промокода отменено.")
-    await callback.answer()
+    text, markup = await _list_view()
+    await _edit_or_answer(callback.message, text, markup)
+    await callback.answer("Отменено")
 
 
 @adm.message(Command("cancel"), StateFilter(PromoNew))
@@ -872,7 +883,7 @@ async def new_start(callback: CallbackQuery, state: FSMContext) -> None:
         "Тип скидки:",
         InlineKeyboardMarkup(inline_keyboard=[
             [_btn("% Процент", "pnew:kind:percent"), _btn("₽ Рубли", "pnew:kind:fixed")],
-            _cancel_row(),
+            [_btn("◀️ К списку", "padm:list")],
         ]),
     )
     await callback.answer()
