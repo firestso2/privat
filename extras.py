@@ -54,6 +54,27 @@ _backup_msg_id: int | None = None
 _last_sig: tuple | None = None
 
 
+# ───────────────────────── возврат в админ-панель ─────────────────────────
+
+async def admin_panel_view():
+    import database as db
+    import keyboards as kb
+    is_open = await db.is_enrollment_open()
+    status = "🟢 открыт" if is_open else "🔴 закрыт"
+    return f"Админ-панель\nНабор сейчас: {status}", kb.admin_menu(is_open)
+
+
+@router.callback_query(F.data == "admin_home")
+async def cb_admin_home(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text, markup = await admin_panel_view()
+    try:
+        await callback.message.edit_text(text, reply_markup=markup)
+    except TelegramBadRequest:
+        await callback.message.answer(text, reply_markup=markup)
+    await callback.answer()
+
+
 # ───────────────────────── пользователи ─────────────────────────
 
 async def ensure_schema() -> None:
