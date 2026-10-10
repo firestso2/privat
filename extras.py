@@ -271,8 +271,10 @@ async def _copy_one(bot: Bot, uid: int, from_chat: int, msg_id: int) -> str:
     return "failed"
 
 
-async def run_broadcast(bot: Bot, admin_id: int, from_chat: int, msg_id: int) -> None:
-    ids = await broadcast_ids()
+async def run_broadcast(
+    bot: Bot, admin_id: int, from_chat: int, msg_id: int, exclude: set[int] | None = None
+) -> dict:
+    ids = [i for i in await broadcast_ids() if not exclude or i not in exclude]
     result = {"ok": 0, "blocked": 0, "failed": 0}
     for uid in ids:
         result[await _copy_one(bot, uid, from_chat, msg_id)] += 1
@@ -285,6 +287,7 @@ async def run_broadcast(bot: Bot, admin_id: int, from_chat: int, msg_id: int) ->
         f"Ошибок: {result['failed']}\n"
         f"Всего в базе: {len(ids)}",
     )
+    return result
 
 
 # ───────────────── бэкап БД в Telegram (переживает рестарты) ─────────────────
