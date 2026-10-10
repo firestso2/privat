@@ -49,6 +49,8 @@ async def cmd_start(message: Message) -> None:
     else:
         await message.answer(text, reply_markup=markup)
 
+    await promo.start_link_hook(message)
+
 
 @router.callback_query(F.data == "enter_private")
 async def enter_private(callback: CallbackQuery) -> None:
