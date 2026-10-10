@@ -235,6 +235,7 @@ async def _menu_view() -> tuple[str, InlineKeyboardMarkup]:
         [_btn("📢 Рассылка по таймеру", "psch:new:broadcast")],
         [_btn("🟢 Открыть набор по таймеру", "psch:new:open")],
         [_btn("🔴 Закрыть набор по таймеру", "psch:new:close")],
+        [_btn("◀️ В админ-панель", "admin_home")],
     ]
     text = "⏰ Отложенные действия\n\n" + (
         f"Запланировано: {len(tasks)}" if tasks else "Пока ничего не запланировано."
@@ -276,8 +277,9 @@ async def cb_menu(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "psch:cancel")
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await _edit_or_answer(callback.message, "Отменено.")
-    await callback.answer()
+    text, markup = await _menu_view()
+    await _edit_or_answer(callback.message, text, markup)
+    await callback.answer("Отменено")
 
 
 @router.callback_query(F.data.startswith("psch:view:"))
