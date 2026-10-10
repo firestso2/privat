@@ -48,13 +48,14 @@ def pay_button_with_confirm(pay_url: str, provider: str, payment_id: str) -> Inl
         InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"cp:{provider}:{payment_id}")
     )
     return builder.as_markup()
+
+
 def confirm_button(provider: str, payment_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"cp:{provider}:{payment_id}")
     )
     return builder.as_markup()
-
 
 
 def admin_menu(is_open: bool) -> InlineKeyboardMarkup:
@@ -67,7 +68,10 @@ def admin_menu(is_open: bool) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🟢 Открыть набор", callback_data="admin_open")
         )
+    builder.row(InlineKeyboardButton(text="🎟 Промокоды", callback_data="admin_promos"))
+    builder.row(InlineKeyboardButton(text="⏰ Отложенные", callback_data="admin_sched"))
+    builder.row(InlineKeyboardButton(text="🤖 Автоматика", callback_data="admin_auto"))
     builder.row(InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"))
-    builder.row(InlineKeyboardButton(text="🛠 Debug env", callback_data="admin_debug_env"))
     builder.row(InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast"))
+    builder.row(InlineKeyboardButton(text="🛠 Debug env", callback_data="admin_debug_env"))
     return builder.as_markup()
