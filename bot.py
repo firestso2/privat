@@ -1,8 +1,10 @@
 import asyncio
 import logging
+
 import extras
 import promo
-
+import planner
+import automation
 
 from aiogram import Bot, Dispatcher
 
@@ -21,8 +23,11 @@ async def main() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+
     await extras.setup(dp, bot)
     await promo.setup(dp, bot)
+    await planner.setup(dp, bot)
+    await automation.setup(dp, bot)
 
     dp.include_router(admin.router)  # админ-роутер выше, чтобы команды не перехватывались юзерскими
     dp.include_router(user.router)
