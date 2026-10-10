@@ -318,6 +318,7 @@ async def _menu_view():
         [_btn("🎯 Лимит мест", "aut:seats")],
         [_btn("📣 Анонс при открытии", "aut:ann")],
         [_btn("📊 Ежедневный отчёт", "aut:rep")],
+        [_btn("◀️ В админ-панель", "admin_home")],
     ])
 
 
@@ -393,8 +394,7 @@ async def cb_menu(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "aut:cancel")
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await _edit_or_answer(callback.message, "Отменено.")
-    await callback.answer()
+    await _show(callback, _menu_view)
 
 
 # ── лимит мест ──
