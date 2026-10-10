@@ -56,6 +56,9 @@ adm.callback_query.filter(F.from_user.id.in_(set(ADMIN_IDS)))
 
 _tasks: set[asyncio.Task] = set()
 
+# функции async (bot, payment_id): вызываются при каждой успешной оплате (см. on_paid)
+PAID_HOOKS: list = []
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS promos (
     code TEXT PRIMARY KEY,
@@ -209,26 +212,43 @@ async def toggle_promo(code: str) -> None:
         await db.commit()
 
 
-async def extend_promo(code: str, seconds: int) -> None:
-    p = await get_promo(code)
-    if not p or p["expires_at"] is None:
-        return
-    new_exp = max(p["expires_at"], int(time.time())) + seconds
+async def set_expiry(code: str, ts: int | None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE promos SET expires_at = ?, expiry_notified = 0 WHERE code = ?",
-            (new_exp, code),
+            "UPDATE promos SET expires_at = ?, expiry_notified = 0 WHERE code = ?", (ts, code)
         )
         await db.commit()
 
 
-async def add_uses(code: str, n: int) -> None:
+async def set_max_uses(code: str, n: int | None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE promos SET max_uses = max_uses + ? WHERE code = ? AND max_uses IS NOT NULL",
-            (n, code),
-        )
+        await db.execute("UPDATE promos SET max_uses = ? WHERE code = ?", (n, code))
         await db.commit()
+
+
+def compute_time_change(p: dict, op: str, sec: int, now: int | None = None):
+    """
+    op 't+' — добавить время, 't-' — убрать.
+    -> (новый expires_at, станет_ли_код_истёкшим)
+    """
+    now = int(time.time()) if now is None else now
+    if op == "t+":
+        base = now if (p["expires_at"] is None or p["expires_at"] <= now) else p["expires_at"]
+        return base + sec, False
+    new = p["expires_at"] - sec
+    return new, new <= now
+
+
+def compute_uses_change(p: dict, op: str, n: int):
+    """
+    op 'u+' — добавить использования, 'u-' — убрать (не ниже уже купленных).
+    -> (новый max_uses, станет_ли_код_исчерпанным)
+    """
+    if op == "u+":
+        base = p["used"] if p["max_uses"] is None else p["max_uses"]
+        return base + n, False
+    new = max(p["used"], p["max_uses"] - n)
+    return new, new <= p["used"]
 
 
 async def delete_promo(code: str) -> None:
@@ -374,6 +394,11 @@ async def attach_to_payment(payment_id: str, user_id: int) -> None:
 
 async def on_paid(bot: Bot, payment_id: str) -> None:
     """Вызывается при успешной оплате. Идемпотентно: списывает использование один раз."""
+    for hook in PAID_HOOKS:
+        try:
+            await hook(bot, payment_id)
+        except Exception:
+            log.exception("paid hook failed")
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "UPDATE promo_payments SET consumed = 1 WHERE payment_id = ? AND consumed = 0",
@@ -475,41 +500,75 @@ async def promo_command_in_state(message: Message, state: FSMContext) -> None:
     raise SkipHandler()
 
 
+async def apply_code(user_id: int, raw: str) -> tuple[str, dict | None]:
+    """Применяет промокод пользователю.
+    -> ('ok' | 'blocked' | 'notfound' | 'disabled' | 'expired' | 'exhausted', promo)"""
+    if rate_left(user_id):
+        return "blocked", None
+    code = _norm(raw)
+    p = await get_promo(code) if _CODE_RE.match(code) else None
+    if p is None:
+        register_fail(user_id)
+        return "notfound", None
+    status = promo_status(p)
+    if status != "ok":
+        return status, p
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO user_promo (user_id, code, applied_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET code = excluded.code, applied_at = excluded.applied_at",
+            (user_id, code, int(time.time())),
+        )
+        await db.commit()
+    reset_fails(user_id)
+    return "ok", p
+
+
 @user_router.message(PromoUser.code, F.text)
 async def promo_code_entered(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id
-    wait = rate_left(uid)
-    if wait:
-        await message.answer(f"Слишком много неверных попыток. Попробуй через {wait // 60 + 1} мин.")
+    status, p = await apply_code(uid, message.text)
+    if status == "blocked":
+        await message.answer(
+            f"Слишком много неверных попыток. Попробуй через {rate_left(uid) // 60 + 1} мин."
+        )
         return
-
-    code = _norm(message.text)
-    p = await get_promo(code) if _CODE_RE.match(code) else None
-    if p is None:
-        register_fail(uid)
+    if status == "notfound":
         await message.answer(
             "❌ Такого промокода нет. Проверь написание и отправь ещё раз.",
             reply_markup=_cancel_user_kb(),
         )
         return
-
-    status = promo_status(p)
-    if status != "ok":
-        await state.clear()
-        await message.answer(f"⌛ Промокод {code} {_REASON[status]}.")
-        await show_price_menu(message, uid)
-        return
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO user_promo (user_id, code, applied_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET code = excluded.code, applied_at = excluded.applied_at",
-            (uid, code, int(time.time())),
-        )
-        await db.commit()
-    reset_fails(uid)
     await state.clear()
+    if status != "ok":
+        await message.answer(f"⌛ Промокод {p['code']} {_REASON[status]}.")
     await show_price_menu(message, uid)
+
+
+async def start_link_hook(message: Message) -> None:
+    """Вызвать в конце /start: ссылка t.me/бот?start=promo_КОД сама применяет промокод."""
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].startswith("promo_"):
+        return
+    uid = message.from_user.id
+    status, p = await apply_code(uid, parts[1][len("promo_"):])
+    if status == "ok":
+        info = await get_price(uid)
+        lines = [
+            f"🎟 Промокод {info.code} применён: {fmt_disc(info.kind, info.value)}.",
+            f"Цена для тебя: {fmt_money(info.final)} ₽ (вместо {fmt_money(info.base)} ₽).",
+        ]
+        if info.left_sec is not None:
+            lines.append(f"⏳ Действует ещё {fmt_left(info.left_sec)}")
+        if info.uses_left is not None:
+            lines.append(f"🔥 Осталось использований: {info.uses_left}")
+        await message.answer("\n".join(lines))
+    elif status == "blocked":
+        await message.answer("Слишком много неверных попыток. Попробуй позже.")
+    elif status == "notfound":
+        await message.answer("❌ Промокод из этой ссылки не найден.")
+    else:
+        await message.answer(f"⌛ Промокод {p['code']} {_REASON[status]}.")
 
 
 @user_router.message(PromoUser.code)
@@ -589,12 +648,22 @@ async def _card_view(code: str) -> tuple[str, InlineKeyboardMarkup] | None:
         f"Покупок: {n} · выручка по коду: {fmt_money(revenue)} ₽ · скидок выдано: {fmt_money(saved)} ₽"
     )
     rows = [[_btn("⏸ Выключить" if p["active"] else "▶️ Включить", f"padm:tog:{code}")]]
+    time_row = [_btn("⏱ ➕ Время", f"padm:t+:{code}")]
     if p["expires_at"] is not None:
-        rows.append([_btn("⏱ +1 день", f"padm:ext:{code}:86400"),
-                     _btn("⏱ +7 дней", f"padm:ext:{code}:604800")])
+        time_row.append(_btn("⏱ ➖ Время", f"padm:t-:{code}"))
+    rows.append(time_row)
+    uses_row = [_btn("🔢 ➕ Использования", f"padm:u+:{code}")]
     if p["max_uses"] is not None:
-        rows.append([_btn("➕ +5 использований", f"padm:addu:{code}:5"),
-                     _btn("➕ +10", f"padm:addu:{code}:10")])
+        uses_row.append(_btn("🔢 ➖ Использования", f"padm:u-:{code}"))
+    rows.append(uses_row)
+    unlimit = []
+    if p["expires_at"] is not None:
+        unlimit.append(_btn("♾ Снять срок", f"padm:tinf:{code}"))
+    if p["max_uses"] is not None:
+        unlimit.append(_btn("♾ Снять лимит", f"padm:uinf:{code}"))
+    if unlimit:
+        rows.append(unlimit)
+    rows.append([_btn("🔗 Ссылка", f"padm:link:{code}")])
     rows.append([_btn("🗑 Удалить", f"padm:del:{code}")])
     rows.append([_btn("◀️ К списку", "padm:list")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
@@ -630,6 +699,17 @@ async def _refresh_card(callback: CallbackQuery, code: str) -> None:
         await _edit_or_answer(callback.message, *view)
 
 
+@adm.callback_query(F.data.startswith("padm:link:"))
+async def adm_link(callback: CallbackQuery) -> None:
+    code = callback.data.split(":", 2)[2]
+    me = await callback.bot.get_me()
+    await callback.message.answer(
+        f"Ссылка, которая сама применяет промокод {code}:\n"
+        f"https://t.me/{me.username}?start=promo_{code}"
+    )
+    await callback.answer()
+
+
 @adm.callback_query(F.data.startswith("padm:tog:"))
 async def adm_toggle(callback: CallbackQuery) -> None:
     code = callback.data.split(":", 2)[2]
@@ -638,20 +718,114 @@ async def adm_toggle(callback: CallbackQuery) -> None:
     await callback.answer("Готово")
 
 
-@adm.callback_query(F.data.startswith("padm:ext:"))
-async def adm_extend(callback: CallbackQuery) -> None:
-    _, _, code, sec = callback.data.split(":")
-    await extend_promo(code, int(sec))
+@adm.callback_query(F.data.startswith("padm:tinf:"))
+async def adm_unlimit_time(callback: CallbackQuery) -> None:
+    code = callback.data.split(":", 2)[2]
+    await set_expiry(code, None)
     await _refresh_card(callback, code)
-    await callback.answer("Продлён")
+    await callback.answer("Срок снят")
 
 
-@adm.callback_query(F.data.startswith("padm:addu:"))
-async def adm_add_uses(callback: CallbackQuery) -> None:
-    _, _, code, n = callback.data.split(":")
-    await add_uses(code, int(n))
+@adm.callback_query(F.data.startswith("padm:uinf:"))
+async def adm_unlimit_uses(callback: CallbackQuery) -> None:
+    code = callback.data.split(":", 2)[2]
+    await set_max_uses(code, None)
     await _refresh_card(callback, code)
-    await callback.answer("Добавлено")
+    await callback.answer("Лимит снят")
+
+
+class PromoEdit(StatesGroup):
+    value = State()
+    confirm = State()
+
+
+_EDIT_ASK = {
+    "t+": "На сколько продлить? Например: 90d, 3h, 15m, 1d12h.",
+    "t-": "Сколько времени убрать? Например: 90d, 3h, 15m, 1d12h.",
+    "u+": "Сколько использований добавить? Пришли число.",
+    "u-": "Сколько использований убрать? Пришли число (не ниже уже купленных).",
+}
+
+
+def _edit_cancel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[_btn("❌ Отмена", "pedit:cancel")]])
+
+
+@adm.callback_query(F.data.regexp(r"^padm:(?:t[+-]|u[+-]):"))
+async def adm_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
+    _, op, code = callback.data.split(":", 2)
+    if not await get_promo(code):
+        await callback.answer("Не найден", show_alert=True)
+        return
+    await state.clear()
+    await state.update_data(code=code, op=op)
+    await state.set_state(PromoEdit.value)
+    await callback.message.answer(f"{code}: {_EDIT_ASK[op]}", reply_markup=_edit_cancel_kb())
+    await callback.answer()
+
+
+@adm.callback_query(F.data == "pedit:cancel")
+async def adm_edit_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _edit_or_answer(callback.message, "Отменено.")
+    await callback.answer()
+
+
+async def _apply_edit(message: Message, code: str, op: str, new) -> None:
+    if op in ("t+", "t-"):
+        await set_expiry(code, new)
+    else:
+        await set_max_uses(code, new)
+    view = await _card_view(code)
+    await message.answer("✅ Изменено\n\n" + view[0], reply_markup=view[1])
+
+
+@adm.message(PromoEdit.value)
+async def adm_edit_value(message: Message, state: FSMContext) -> None:
+    if (message.text or "").startswith("/"):
+        raise SkipHandler()
+    d = await state.get_data()
+    code, op = d["code"], d["op"]
+    p = await get_promo(code)
+    if not p:
+        await state.clear()
+        await message.answer("Промокод не найден.")
+        return
+    now = int(time.time())
+    text = (message.text or "").strip()
+    if op in ("t+", "t-"):
+        parsed = parse_ttl(text, now)
+        if not parsed or parsed[0] is None:
+            await message.answer("Нужен срок, например: 90d, 3h, 15m, 1d12h.")
+            return
+        new, inactive = compute_time_change(p, op, parsed[0], now)
+        what = "истёкшим"
+    else:
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("Нужно целое число от 1.")
+            return
+        new, inactive = compute_uses_change(p, op, int(text))
+        what = "исчерпанным"
+    if inactive:
+        await state.update_data(new=new)
+        await state.set_state(PromoEdit.confirm)
+        await message.answer(
+            f"После этого промокод {code} станет {what}. Продолжить?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                _btn("✅ Да", "pedit:ok"), _btn("❌ Отмена", "pedit:cancel"),
+            ]]),
+        )
+        return
+    await state.clear()
+    await _apply_edit(message, code, op, new)
+
+
+@adm.callback_query(F.data == "pedit:ok", PromoEdit.confirm)
+async def adm_edit_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    d = await state.get_data()
+    await state.clear()
+    await _apply_edit(callback.message, d["code"], d["op"], d["new"])
+    await callback.answer()
 
 
 @adm.callback_query(F.data.startswith("padm:del:"))
