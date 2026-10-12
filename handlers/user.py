@@ -13,6 +13,7 @@ import payments
 import cryptobot_payments
 import xrocket_payments
 import access
+import automation
 import promo
 from payment_dispatch import PAID_STATUS, DEAD_STATUSES, check_status
 from config import (
@@ -42,12 +43,14 @@ async def cmd_start(message: Message) -> None:
     markup = kb.main_menu(is_open)
 
     photo_id = await db.get_open_photo() if is_open else await db.get_closed_photo()
-    text = FALLBACK_TEXT_OPEN if is_open else FALLBACK_TEXT_CLOSED
+    text = await automation.get_start_text(
+        is_open, FALLBACK_TEXT_OPEN if is_open else FALLBACK_TEXT_CLOSED
+    )
 
     if photo_id:
-        await message.answer_photo(photo_id, caption=text, reply_markup=markup)
+        await message.answer_photo(photo_id, caption=text, reply_markup=markup, parse_mode="HTML")
     else:
-        await message.answer(text, reply_markup=markup)
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
     await promo.start_link_hook(message)
 
