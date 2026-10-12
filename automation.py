@@ -6,6 +6,9 @@ automation.py — автоматика для админа:
   📣 Анонс при открытии: при открытии набора (кнопкой или по таймеру) выбранное
      сообщение уходит всем, кто ещё не оплатил.
   📊 Ежедневный отчёт: в заданное время (МСК) админам приходит сводка за день.
+  📝 Тексты /start: тексты «набор закрыт/открыт» меняются из бота; подстановки
+     {next_dates}, {next_open}, {next_close} берут даты из запланированных
+     открытия/закрытия набора (см. planner).
 
 Подключение: две строки в bot.py (см. сообщение), кнопка «🤖 Автоматика»
 в админ-меню уже есть в keyboards.py. Команды: /auto, /report.
@@ -16,6 +19,7 @@ automation.py — автоматика для админа:
     дополнительно запускает анонс, когда набор переходит из закрытого в открытый.
 """
 import asyncio
+import html
 import logging
 import re
 import time
@@ -37,6 +41,7 @@ from aiogram.types import (
 
 import database as db
 import extras
+import planner
 import promo
 from config import ADMIN_IDS, DB_PATH
 from payment_dispatch import PAID_STATUS
@@ -275,12 +280,62 @@ async def _report_loop(bot: Bot) -> None:
             log.exception("report loop error")
 
 
+# ───────────────────────── тексты /start ─────────────────────────
+
+_TXT = {
+    "closed": ("text_closed", "🔴 Текст при закрытом наборе"),
+    "open": ("text_open", "🟢 Текст при открытом наборе"),
+}
+
+
+async def next_dates() -> tuple[int | None, int | None]:
+    """(ближайшее запланированное открытие, ближайшее закрытие после него)."""
+    pending = await planner.list_pending()
+    opens = [t for t in pending if t["kind"] == "open"]
+    if not opens:
+        return None, None
+    o = opens[0]["run_at"]
+    closes = [t["run_at"] for t in pending if t["kind"] == "close" and t["run_at"] > o]
+    return o, (closes[0] if closes else None)
+
+
+def _dm(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=MSK).strftime("%d.%m")
+
+
+async def render_placeholders(text: str) -> str:
+    if "{next_" not in text:
+        return text
+    o, c = await next_dates()
+    if o and c:
+        dates = f"{_dm(o)}–{_dm(c)}"
+    elif o:
+        dates = f"с {_dm(o)}"
+    else:
+        dates = "скоро"
+    return (text.replace("{next_dates}", dates)
+                .replace("{next_open}", _dm(o) if o else "скоро")
+                .replace("{next_close}", _dm(c) if c else "скоро"))
+
+
+async def get_start_text(is_open: bool, default: str) -> str:
+    """Текст для /start (HTML). Свой текст из бота, иначе default из кода."""
+    try:
+        stored = await db.get_setting("text_open" if is_open else "text_closed", "")
+        text = stored if stored else html.escape(default, quote=False)
+        return await render_placeholders(text)
+    except Exception:
+        log.exception("get_start_text failed")
+        return html.escape(default, quote=False)
+
+
 # ───────────────────────── интерфейс ─────────────────────────
 
 class Auto(StatesGroup):
     seats = State()
     announce = State()
     report_time = State()
+    text = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:
@@ -308,16 +363,19 @@ async def _menu_view():
     ann = await db.get_setting("announce_enabled", "0") == "1"
     rep = await db.get_setting("report_enabled", "0") == "1"
     rep_time = await db.get_setting("report_time", DEFAULT_REPORT_TIME)
+    has_txt = bool(await db.get_setting("text_closed")) or bool(await db.get_setting("text_open"))
     text = (
         "🤖 Автоматика\n\n"
         f"🎯 Лимит мест: {seats_txt}\n"
         f"📣 Анонс при открытии набора: {'включён' if ann else 'выключен'}\n"
-        f"📊 Ежедневный отчёт: {'в ' + rep_time + ' МСК' if rep else 'выключен'}"
+        f"📊 Ежедневный отчёт: {'в ' + rep_time + ' МСК' if rep else 'выключен'}\n"
+        f"📝 Тексты /start: {'свои' if has_txt else 'стандартные'}"
     )
     return text, _kb([
         [_btn("🎯 Лимит мест", "aut:seats")],
         [_btn("📣 Анонс при открытии", "aut:ann")],
         [_btn("📊 Ежедневный отчёт", "aut:rep")],
+        [_btn("📝 Тексты /start", "aut:txt")],
         [_btn("◀️ В админ-панель", "admin_home")],
     ])
 
@@ -538,6 +596,115 @@ async def got_report_time(message: Message, state: FSMContext) -> None:
 async def cb_rep_now(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer(await build_report())
+
+
+# ── тексты /start ──
+
+async def _txt_menu_view():
+    cl = bool(await db.get_setting("text_closed"))
+    op = bool(await db.get_setting("text_open"))
+    text = (
+        "📝 Тексты на /start\n\n"
+        f"🔴 Набор закрыт: {'свой текст' if cl else 'стандартный'}\n"
+        f"🟢 Набор открыт: {'свой текст' if op else 'стандартный'}\n\n"
+        "Тексты меняются сразу, без правок в GitHub."
+    )
+    return text, _kb([
+        [_btn("🔴 Набор закрыт", "aut:txt:closed")],
+        [_btn("🟢 Набор открыт", "aut:txt:open")],
+        _BACK,
+    ])
+
+
+async def _txt_view(kind: str):
+    key, title = _TXT[kind]
+    custom = bool(await db.get_setting(key))
+    o, c = await next_dates()
+    now_dates = "скоро (ничего не запланировано)"
+    if o and c:
+        now_dates = f"{_dm(o)}–{_dm(c)}"
+    elif o:
+        now_dates = f"с {_dm(o)}"
+    text = (
+        f"{title}\n\n"
+        f"Сейчас: {'свой текст' if custom else 'стандартный (зашит в user.py)'}\n\n"
+        "Подстановки, которые меняются сами:\n"
+        "{next_dates} — даты ближайшего набора, например 24.10–31.10\n"
+        "{next_open} — дата открытия, {next_close} — дата закрытия\n"
+        "Даты берутся из запланированных в «⏰ Отложенные» открытия и закрытия. "
+        f"Сейчас {{next_dates}} = {now_dates}.\n\n"
+        "Форматирование (жирный, курсив, ссылки) сохраняется."
+    )
+    rows = [[_btn("✏️ Изменить", f"aut:txt_set:{kind}")]]
+    if custom:
+        rows[0].append(_btn("👁 Предпросмотр", f"aut:txt_prev:{kind}"))
+        rows.append([_btn("♻️ Сбросить на стандартный", f"aut:txt_reset:{kind}")])
+    rows.append([_btn("◀️ Назад", "aut:txt")])
+    return text, _kb(rows)
+
+
+@router.callback_query(F.data == "aut:txt")
+async def cb_txt(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show(callback, _txt_menu_view)
+
+
+@router.callback_query(F.data.in_({"aut:txt:closed", "aut:txt:open"}))
+async def cb_txt_item(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    kind = callback.data.split(":")[2]
+    await _edit_or_answer(callback.message, *(await _txt_view(kind)))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("aut:txt_set:"))
+async def cb_txt_set(callback: CallbackQuery, state: FSMContext) -> None:
+    kind = callback.data.split(":")[2]
+    await state.set_state(Auto.text)
+    await state.update_data(kind=kind)
+    await callback.message.answer(
+        "Пришли новый текст одним сообщением (до 1000 символов). "
+        "Можно использовать форматирование и подстановки {next_dates}, {next_open}, {next_close}.",
+        reply_markup=_kb([[_btn("❌ Отмена", f"aut:txt:{kind}")]]),
+    )
+    await callback.answer()
+
+
+@router.message(Auto.text)
+async def got_txt(message: Message, state: FSMContext) -> None:
+    if (message.text or "").startswith("/"):
+        raise SkipHandler()
+    if not message.text:
+        await message.answer("Пришли текст сообщением.")
+        return
+    if len(message.text) > 1000:
+        await message.answer(f"Слишком длинно: {len(message.text)} из 1000 символов "
+                             "(подпись к фото ограничена Telegram). Сократи.")
+        return
+    kind = (await state.get_data())["kind"]
+    await state.clear()
+    await db.set_setting(_TXT[kind][0], message.html_text)
+    await message.answer(await render_placeholders(message.html_text), parse_mode="HTML")
+    view = await _txt_view(kind)
+    await message.answer("✅ Сохранено. Выше — как это увидит пользователь.\n\n" + view[0],
+                         reply_markup=view[1])
+
+
+@router.callback_query(F.data.startswith("aut:txt_prev:"))
+async def cb_txt_prev(callback: CallbackQuery) -> None:
+    kind = callback.data.split(":")[2]
+    stored = await db.get_setting(_TXT[kind][0], "")
+    if stored:
+        await callback.message.answer(await render_placeholders(stored), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("aut:txt_reset:"))
+async def cb_txt_reset(callback: CallbackQuery) -> None:
+    kind = callback.data.split(":")[2]
+    await db.set_setting(_TXT[kind][0], "")
+    await callback.answer("Сброшено")
+    await _edit_or_answer(callback.message, *(await _txt_view(kind)))
 
 
 # ───────────────────────── подключение ─────────────────────────
